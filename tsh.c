@@ -188,7 +188,7 @@ void eval(char *cmdline)
 
             // Exit if we get an invalid command.
             if(execve(argv[0], argv, environ) < 0 ){
-	   	        printf("This is not a valid command.\n");
+	   	        printf("%s: Command not found\n", argv[0]);
 		        exit(0);
 	        }
         }
@@ -364,18 +364,15 @@ void do_bgfg(char **argv)
 
     // Case 2: We are given a JID
     }else if(argv[1][0] == '%') { //first character is % and getjobjid returns a non null value means that ID is a JID.
-        // FIXME
-        printf("WE HAVE ARRIVED AT THE JID BG\n"); 
-
         if( getjobjid(jobs, atoi(&argv[1][1]))){
             if(!strcmp(argv[0], bg)){
-                jid = atoi(argv[1]);
+                jid = atoi(&argv[1][1]);
                 jobp = getjobjid(jobs, jid);
                 kill(-(jobp->pid), SIGCONT);
                 jobp->state = BG;
                 printf("[%d] (%d) %s", jobp->jid, jobp->pid, jobp->cmdline);
             }else if(!strcmp(argv[0], fg)){
-                jid = atoi(argv[1]);
+                jid = atoi(&argv[1][1]);
                 jobp = getjobjid(jobs, jid);
                 kill(-(jobp->pid), SIGCONT);
                 jobp->state = FG;
@@ -386,46 +383,9 @@ void do_bgfg(char **argv)
                 return;
             }
         }else{
-            printf("This job/jid does not exist");
+            printf("This job/jid does not exist\n");
         }
     }
-    /*else{
-         if (jobp == NULL) {
-                printf("Error: Process with that PID does not exist.\n");
-                return;
-            }
-    } */
-
-        // Case 2: argv[2] represents a JID (JID's start with %)
-        else if (argv[1][0] == '%') {
-            jid = atoi(&argv[1][1]); // Convert the JID in string form from argv[1][1] into an integer.
-            jobp = getjobjid(jobs, jid); // Search for the job with that JID in the list of jobs.
-
-            // Check if a job with that JID exists.
-            if (jobp == NULL) {
-                printf("Error: Job with that JID does not exist.\n");
-                return;
-            }
-        }
-
-        // Case 3: Invalid input
-        else {
-            printf("Error: Invalid input.\n");
-            return;
-        }
-
-    // Step 2: Check if command is bg or fg
-    // Case 1: The command is bg is "bg".
-    if ( !strcmp(argv[0], bg) ) {
-        pid = jobp->pid;
-        kill(-pid, SIGCONT);
-        jobp->state = BG; // Sets the state integer value to '2', representing a job in the background.
-    }
-
-    else if ( !strcmp(argv[0], fg) ) {
-        printf("FIXME!\n");
-    }
-
     return;
 }
 
