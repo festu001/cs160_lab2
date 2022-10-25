@@ -166,6 +166,45 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char *argv[MAXARGS];
+    int is_bg = parseline(cmdline, argv); // is_bg == 1 means that we are doing a BG job, is_bg == 0 means that it is an FG job.
+    sigset_t mask;
+    pid_t pid;
+
+    if (argv[0] == NULL) { return;} // Empty input, go back.
+
+    if(!builtin_cmd(argv)) {
+        sigemptyset(&mask);
+        sigaddset(&mask, SIGINT);
+	    sigaddset(&mask, SIGTSTP);
+        sigaddset(&mask, SIGCHLD);
+        sigprocmask(SIG_BLOCK, &mask, NULL);
+
+        pid = fork(); // Once we block signals, we fork.
+
+        if(pid == 0) { // When pid == 0, we are in the child's context.
+            sigprocmask(SIG_UNBLOCK, &mask, NULL); // Unblock the signal mask inside the child.
+            setpgid(0, 0); // 
+
+            // Exit if we get an invalid command.
+            if(execve(argv[0], argv, environ) < 0 ){
+	   	        printf("This is not a valid command.\n");
+		        exit(0);
+	        }
+        }
+
+        if(is_bg) {
+            addjob(jobs, pid, BG, cmdline);
+            sigprocmask(SIG_UNBLOCK, &mask, NULL);
+            printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
+        }
+
+        else {
+            addjob(jobs, pid, FG, cmdline);
+            sigprocmask(SIG_UNBLOCK, &mask, NULL);
+            waitfg(pid);
+        }
+    }
     return;
 }
 
@@ -321,12 +360,11 @@ void do_bgfg(char **argv)
             }
         }else{
             printf("This job/pid does not exist");
+            return;
         }
 
-
-
-
-    }else if(argv[1][0] == '%') { //first character is % and getjobjid returns a non null value
+    // Case 2: We are given a JID
+    }else if(argv[1][0] == '%') { //first character is % and getjobjid returns a non null value means that ID is a JID.
         if( getjobjid(atoi(&argv[1][1]))){
             if(!strcmp(argv[0], bg)){
 
@@ -364,7 +402,6 @@ void do_bgfg(char **argv)
             printf("Error: Invalid input.\n");
             return;
         }
-    }
 
     // Step 2: Check if command is bg or fg
     // Case 1: The command is bg is "bg".
@@ -387,7 +424,9 @@ void do_bgfg(char **argv)
 void waitfg(pid_t pid)
 {
     struct job_t *foregroundJob = getjobpid(jobs, pid);
-    while(foregroundJob -> state == FG);
+    while(foregroundJob -> state == FG) {
+        sleep(1);
+    }
     return 1;
 }
 
