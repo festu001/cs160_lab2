@@ -178,8 +178,8 @@ void eval(char *cmdline)
         sigaddset(&mask, SIGINT);
 	    sigaddset(&mask, SIGTSTP);
         sigaddset(&mask, SIGCHLD);
-        sigprocmask(SIG_BLOCK, &mask, NULL);
 
+        sigprocmask(SIG_BLOCK, &mask, NULL);
         pid = fork(); // Once we block signals, we fork.
 
         if(pid == 0) { // When pid == 0, we are in the child's context.
@@ -292,7 +292,7 @@ int builtin_cmd(char **argv)
     }
     else if(!strcmp(cmd, jobs_str)) {
         listjobs(jobs);
-        printf('\n');
+        printf("\n");
         return 1;
     }
     else if( !strcmp(cmd, bg) || !strcmp(cmd, fg) ) {
@@ -339,23 +339,22 @@ void do_bgfg(char **argv)
     // Case 1: We are given a PID
     if (isdigit( argv[1][0] )) { // If the first character is a digit and getjobpid returns a non null value (aka a job with that PID exists), then the ID is a pid.
         // Now we need to check whether or not we need to execute bg or fg.
-        if(getjobpid(atoi(argv[1]))){
+        if(getjobpid(jobs, atoi(argv[1])) != NULL){
             if(!strcmp(argv[0], bg)){ // Case 1: We are given a valid PID and the command "bg".
                 pid = atoi(argv[1]);
                 jobp = getjobpid(jobs, pid);
                 kill(-(jobp->pid), SIGCONT);
                 jobp->state = BG;
-                printf("[%d] (%d) %s", jobp->pid)
+                printf("[%d] (%d) %s", jobp->jid, jobp->pid, jobp->cmdline);
                 return;
-            }else if(!strcmp(argv[0], fg){ // Case 2: We are given a valid PID and the command "fg"
+            }else if(!strcmp(argv[0], fg)){ // Case 2: We are given a valid PID and the command "fg"
                 pid = atoi(argv[1]);
                 jobp = getjobpid(jobs, pid);
                 kill(-(jobp->pid), SIGCONT);
                 jobp->state = FG;
                 waitfg(jobp->pid);
-                return;
             }else{
-                printf("This should not have happened but here we are.")
+                printf("This should not have happened but here we are.");
                 return;
             }
         }else{
@@ -365,13 +364,25 @@ void do_bgfg(char **argv)
 
     // Case 2: We are given a JID
     }else if(argv[1][0] == '%') { //first character is % and getjobjid returns a non null value means that ID is a JID.
-        if( getjobjid(atoi(&argv[1][1]))){
+        // FIXME
+        printf("WE HAVE ARRIVED AT THE JID BG\n"); 
+
+        if( getjobjid(jobs, atoi(&argv[1][1]))){
             if(!strcmp(argv[0], bg)){
-
-            }else if(!strcmp(argv[0], fg){
-
+                jid = atoi(argv[1]);
+                jobp = getjobjid(jobs, jid);
+                kill(-(jobp->pid), SIGCONT);
+                jobp->state = BG;
+                printf("[%d] (%d) %s", jobp->jid, jobp->pid, jobp->cmdline);
+            }else if(!strcmp(argv[0], fg)){
+                jid = atoi(argv[1]);
+                jobp = getjobjid(jobs, jid);
+                kill(-(jobp->pid), SIGCONT);
+                jobp->state = FG;
+                waitfg(jobp->pid);
+                
             }else{
-                printf("idk how u got here")
+                printf("idk how u got here");
                 return;
             }
         }else{
@@ -427,7 +438,7 @@ void waitfg(pid_t pid)
     while(foregroundJob -> state == FG) {
         sleep(1);
     }
-    return 1;
+    return;
 }
 
 /*****************
@@ -443,6 +454,31 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+    pid_t pid_child;
+    int status;
+
+    while( (pid_child = waitpid(-1, &status, WNOHANG | WUNTRACED) ) > 0) {
+        if(WIFSIGNALED(status)) {
+            printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid_child), pid_child, WTERMSIG(status));
+			deletejob(jobs, pid_child);
+        }
+
+        else if(WIFEXITED(status)) {
+			deletejob(jobs, pid_child);
+        }
+
+        else if(WIFSTOPPED(status)) { 
+            struct job_t *job_child = getjobpid(jobs, pid_child);
+
+            if (job_child == NULL) { return; }
+
+            else {
+                job_child->state = ST;
+                printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(pid_child), pid_child, WSTOPSIG(status));
+            }
+        }
+    }
+
     return;
 }
 
@@ -454,8 +490,11 @@ void sigchld_handler(int sig)
 void sigint_handler(int sig) 
 {
     pid_t foregroundgroup = fgpid(jobs);
-    kill(-foregroundgroup, SIGINT);
-    return 1;
+
+    if (foregroundgroup > 0) {
+        kill(-foregroundgroup, SIGINT);
+    }
+    return;
 }
 
 /*
@@ -466,8 +505,11 @@ void sigint_handler(int sig)
 void sigtstp_handler(int sig) 
 {
     pid_t foregroundgroup = fgpid(jobs);
-    kill(-foregroundgroup, SIGTSTP);
-    return 1;
+
+    if (foregroundgroup > 0) {
+        kill(-foregroundgroup, SIGTSTP);
+    } 
+    return;
 }
 
 
