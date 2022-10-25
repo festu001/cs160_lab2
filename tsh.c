@@ -243,7 +243,7 @@ int builtin_cmd(char **argv)
     char *cmd = argv[0]; // Take the first entry of the user's input, which we will then check to see if it is a command
 
     char quit[] = "quit";
-    char jobs[] = "jobs";
+    char jobs_str[] = "jobs";
     char bg[] = "bg";
     char fg[] = "fg";
 
@@ -251,7 +251,7 @@ int builtin_cmd(char **argv)
     if(!strcmp(cmd, quit)) {
         exit(0);
     }
-    else if(!strcmp(cmd, jobs)) {
+    else if(!strcmp(cmd, jobs_str)) {
         listjobs(jobs);
         printf('\n');
         return 1;
@@ -283,7 +283,7 @@ void do_bgfg(char **argv)
     char fg[] = "fg";
     pid_t pid;
     int jid;
-    /* Instead of dealing with pointers since if argv[1] is null, there could be a null pointer being dereferenced, I'm just gonna use argv[0] directly. 
+    /* Instead of dealing  with pointers since if argv[1] is null, there could be a null pointer being dereferenced, I'm just gonna use argv[0] directly. 
         In this case, argv[0] = the command "bg" or "fg" as a C-string,
         and argv[1] = the PID/JID provided by
     char *bgfg = argv[0]; 
@@ -296,20 +296,56 @@ void do_bgfg(char **argv)
         return;
     }
 
-    else { // Check if arvg[1] is a PID or PID
+    // We need to now check if the ID is a PID or a JID to determine what to do.
+    // Case 1: We are given a PID
+    if (isdigit( argv[1][0] )) { // If the first character is a digit and getjobpid returns a non null value (aka a job with that PID exists), then the ID is a pid.
+        // Now we need to check whether or not we need to execute bg or fg.
+        if(getjobpid(atoi(argv[1]))){
+            if(!strcmp(argv[0], bg)){ // Case 1: We are given a valid PID and the command "bg".
+                pid = atoi(argv[1]);
+                jobp = getjobpid(jobs, pid);
+                kill(-(jobp->pid), SIGCONT);
+                jobp->state = BG;
+                printf("[%d] (%d) %s", jobp->pid)
+                return;
+            }else if(!strcmp(argv[0], fg){ // Case 2: We are given a valid PID and the command "fg"
+                pid = atoi(argv[1]);
+                jobp = getjobpid(jobs, pid);
+                kill(-(jobp->pid), SIGCONT);
+                jobp->state = FG;
+                waitfg(jobp->pid);
+                return;
+            }else{
+                printf("This should not have happened but here we are.")
+                return;
+            }
+        }else{
+            printf("This job/pid does not exist");
+        }
 
-        // Case 1: argv[1] is a PID (PID's start with a numerical digit 0-9)
-        if (isdigit( argv[1][0] )) {
-            // Get the PID, and check if it exists by placing it into jobp.
-            pid = atoi(argv[1]);
-            jobp = getjobpid(jobs, pid);
 
-            // Check if a process with that PID exists.
-            if (jobp == NULL) {
+
+
+    }else if(argv[1][0] == '%') { //first character is % and getjobjid returns a non null value
+        if( getjobjid(atoi(&argv[1][1]))){
+            if(!strcmp(argv[0], bg)){
+
+            }else if(!strcmp(argv[0], fg){
+
+            }else{
+                printf("idk how u got here")
+                return;
+            }
+        }else{
+            printf("This job/jid does not exist");
+        }
+    }
+    /*else{
+         if (jobp == NULL) {
                 printf("Error: Process with that PID does not exist.\n");
                 return;
             }
-        } 
+    } */
 
         // Case 2: argv[2] represents a JID (JID's start with %)
         else if (argv[1][0] == '%') {
