@@ -2,7 +2,7 @@
  * tsh - A tiny shell program with job control
  * 
  * Fiorello Estuar and Kunal Mittal
- * festu001 and 
+ * festu001 and kmitt006
  */
 #include <stdio.h>
 #include <stdlib.h>
