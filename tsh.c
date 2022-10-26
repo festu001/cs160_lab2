@@ -166,6 +166,45 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char *argv[MAXARGS];
+    int is_bg = parseline(cmdline, argv); // is_bg == 1 means that we are doing a BG job, is_bg == 0 means that it is an FG job.
+    sigset_t mask;
+    pid_t pid;
+
+    if (argv[0] == NULL) { return;} // Empty input, go back.
+
+    if(!builtin_cmd(argv)) {
+        sigemptyset(&mask);
+        sigaddset(&mask, SIGINT);
+	    sigaddset(&mask, SIGTSTP);
+        sigaddset(&mask, SIGCHLD);
+
+        sigprocmask(SIG_BLOCK, &mask, NULL);
+        pid = fork(); // Once we block signals, we fork.
+
+        if(pid == 0) { // When pid == 0, we are in the child's context.
+            sigprocmask(SIG_UNBLOCK, &mask, NULL); // Unblock the signal mask inside the child.
+            setpgid(0, 0); // 
+
+            // Exit if we get an invalid command.
+            if(execve(argv[0], argv, environ) < 0 ){
+	   	        printf("%s: Command not found\n", argv[0]);
+		        exit(0);
+	        }
+        }
+
+        if(is_bg) {
+            addjob(jobs, pid, BG, cmdline);
+            sigprocmask(SIG_UNBLOCK, &mask, NULL);
+            printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
+        }
+
+        else {
+            addjob(jobs, pid, FG, cmdline);
+            sigprocmask(SIG_UNBLOCK, &mask, NULL);
+            waitfg(pid);
+        }
+    }
     return;
 }
 
@@ -240,9 +279,10 @@ int builtin_cmd(char **argv)
         3) If it is, immediately switch to performing the built-in command and return a non-zero value (I'm choosing 1 for simplicity)
         4) If it is not, then return 0. */
 
-    char cmd[] = argv[0]; // Take the first entry of the user's input, which we will then check to see if it is a command
+    char *cmd = argv[0]; // Take the first entry of the user's input, which we will then check to see if it is a command
+
     char quit[] = "quit";
-    char jobs[] = "jobs";
+    char jobs_str[] = "jobs";
     char bg[] = "bg";
     char fg[] = "fg";
 
@@ -250,16 +290,15 @@ int builtin_cmd(char **argv)
     if(!strcmp(cmd, quit)) {
         exit(0);
     }
-    else if(!strcmp(cmd, jobs)) {
+    else if(!strcmp(cmd, jobs_str)) {
         listjobs(jobs);
-        printf('\n');
+        //printf("\n");
         return 1;
     }
     else if( !strcmp(cmd, bg) || !strcmp(cmd, fg) ) {
         do_bgfg(argv);
         return 1;
     }
-
 
     return 0;     /* not a builtin command */
 }
@@ -268,15 +307,85 @@ int builtin_cmd(char **argv)
  * do_bgfg - Execute the builtin bg and fg commands
  */
 void do_bgfg(char **argv) 
-{
-    char bgfg[] = argv[0]; // Take the first entry of the user's input, which we will then check to see whether it is 'bg' or 'fg'. Because we are in do_bgfg, we will only get here if it was one of those already.
+{   /* General outline:
+        1) Check if there is a PID/JID provided.
+            a) If not, print an error message and return.
+            b) If so, determine which it is (PID or JID)
+            c) Check if it is a valid PID/JID.
+        2) Parse whether or not the command is "bg" or "fg"
+        3) Execute relevant command.
+
+    */
+
+    struct job_t *jobp = NULL;
     char bg[] = "bg";
     char fg[] = "fg";
+    pid_t pid;
+    int jid;
+    /* Instead of dealing  with pointers since if argv[1] is null, there could be a null pointer being dereferenced, I'm just gonna use argv[0] directly. 
+        In this case, argv[0] = the command "bg" or "fg" as a C-string,
+        and argv[1] = the PID/JID provided by
+    char *bgfg = argv[0]; 
+    char *id = argv[1];
+    */
 
-    if ( !strcmp(bgfg, bg) ) { // Case for when it is "bg"
-        
+    // Check if PID was provided.
+    if (argv[1] == NULL) {
+        printf("%s command requires PID or %%jobid argument\n", argv[0]);
+        return;
     }
 
+    // We need to now check if the ID is a PID or a JID to determine what to do.
+    // Case 1: We are given a PID
+    if (isdigit( argv[1][0] )) { // If the first character is a digit and getjobpid returns a non null value (aka a job with that PID exists), then the ID is a pid.
+        // Now we need to check whether or not we need to execute bg or fg.
+        if(getjobpid(jobs, atoi(argv[1])) != NULL){
+            if(!strcmp(argv[0], bg)){ // Case 1: We are given a valid PID and the command "bg".
+                pid = atoi(argv[1]);
+                jobp = getjobpid(jobs, pid);
+                kill(-(jobp->pid), SIGCONT);
+                jobp->state = BG;
+                printf("[%d] (%d) %s", jobp->jid, jobp->pid, jobp->cmdline);
+                return;
+            }else if(!strcmp(argv[0], fg)){ // Case 2: We are given a valid PID and the command "fg"
+                pid = atoi(argv[1]);
+                jobp = getjobpid(jobs, pid);
+                kill(-(jobp->pid), SIGCONT);
+                jobp->state = FG;
+                waitfg(jobp->pid);
+            }else{
+                printf("This should not have happened but here we are.");
+                return;
+            }
+        }else{
+            printf("(%s): No such process \n", argv[1]);
+            return;
+        }
+
+    // Case 2: We are given a JID
+    }else if(argv[1][0] == '%') { //first character is % and getjobjid returns a non null value means that ID is a JID.
+        if( getjobjid(jobs, atoi(&argv[1][1]))){
+            if(!strcmp(argv[0], bg)){
+                jid = atoi(&argv[1][1]);
+                jobp = getjobjid(jobs, jid);
+                kill(-(jobp->pid), SIGCONT);
+                jobp->state = BG;
+                printf("[%d] (%d) %s", jobp->jid, jobp->pid, jobp->cmdline);
+            }else if(!strcmp(argv[0], fg)){
+                jid = atoi(&argv[1][1]);
+                jobp = getjobjid(jobs, jid);
+                kill(-(jobp->pid), SIGCONT);
+                jobp->state = FG;
+                waitfg(jobp->pid);
+                
+            }else{
+                printf("idk how u got here");
+                return;
+            }
+        }else{
+            printf("%s: no such job\n", argv[1]);
+        }
+    }
     return;
 }
 
@@ -286,8 +395,10 @@ void do_bgfg(char **argv)
 void waitfg(pid_t pid)
 {
     struct job_t *foregroundJob = getjobpid(jobs, pid);
-    while(foregroundJob -> state == FG);
-    return 1;
+    while(foregroundJob -> state == FG) {
+        sleep(1);
+    }
+    return;
 }
 
 /*****************
@@ -303,6 +414,31 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+    pid_t pid_child;
+    int status;
+
+    while( (pid_child = waitpid(-1, &status, WNOHANG | WUNTRACED) ) > 0) {
+        if(WIFSIGNALED(status)) {
+            printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid_child), pid_child, WTERMSIG(status));
+			deletejob(jobs, pid_child);
+        }
+
+        else if(WIFEXITED(status)) {
+			deletejob(jobs, pid_child);
+        }
+
+        else if(WIFSTOPPED(status)) { 
+            struct job_t *job_child = getjobpid(jobs, pid_child);
+
+            if (job_child == NULL) { return; }
+
+            else {
+                job_child->state = ST;
+                printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(pid_child), pid_child, WSTOPSIG(status));
+            }
+        }
+    }
+
     return;
 }
 
@@ -314,8 +450,11 @@ void sigchld_handler(int sig)
 void sigint_handler(int sig) 
 {
     pid_t foregroundgroup = fgpid(jobs);
-    kill(-foregroundgroup, SIGINT);
-    return 1;
+
+    if (foregroundgroup > 0) {
+        kill(-foregroundgroup, SIGINT);
+    }
+    return;
 }
 
 /*
@@ -326,8 +465,11 @@ void sigint_handler(int sig)
 void sigtstp_handler(int sig) 
 {
     pid_t foregroundgroup = fgpid(jobs);
-    kill(-foregroundgroup, SIGTSTP);
-    return 1;
+
+    if (foregroundgroup > 0) {
+        kill(-foregroundgroup, SIGTSTP);
+    } 
+    return;
 }
 
 
