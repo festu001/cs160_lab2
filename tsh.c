@@ -292,7 +292,7 @@ int builtin_cmd(char **argv)
     }
     else if(!strcmp(cmd, jobs_str)) {
         listjobs(jobs);
-        printf("\n");
+        //printf("\n");
         return 1;
     }
     else if( !strcmp(cmd, bg) || !strcmp(cmd, fg) ) {
@@ -331,7 +331,7 @@ void do_bgfg(char **argv)
 
     // Check if PID was provided.
     if (argv[1] == NULL) {
-        printf("ERROR: No PID or JID provided.\n");
+        printf("%s command requires PID or %%jobid argument\n", argv[0]);
         return;
     }
 
@@ -358,7 +358,7 @@ void do_bgfg(char **argv)
                 return;
             }
         }else{
-            printf("This job/pid does not exist");
+            printf("(%s): No such process \n", argv[1]);
             return;
         }
 
@@ -383,7 +383,7 @@ void do_bgfg(char **argv)
                 return;
             }
         }else{
-            printf("This job/jid does not exist\n");
+            printf("%s: no such job\n", argv[1]);
         }
     }
     return;
